@@ -9,6 +9,7 @@ from pathlib import Path
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MAX_IMAGE_BYTES = 1024 * 1024
 MAX_DIMENSION = 1024
+KNOWN_CRITICAL_CHUNKS = {b"IHDR", b"PLTE", b"IDAT", b"IEND"}
 
 
 def load_image(path: Path) -> bytes:
@@ -53,6 +54,8 @@ def verify_png_chunks(image: bytes) -> None:
             or 97 <= chunk_type[2] <= 122
         ):
             raise ValueError("entry.png contains an invalid PNG chunk type")
+        if 65 <= chunk_type[0] <= 90 and chunk_type not in KNOWN_CRITICAL_CHUNKS:
+            raise ValueError("entry.png contains an unknown critical PNG chunk")
         if chunk_index == 0 and (chunk_type != b"IHDR" or chunk_length != 13):
             raise ValueError("entry.png must start with a 13-byte IHDR chunk")
         if chunk_type == b"IHDR" and chunk_index != 0:
