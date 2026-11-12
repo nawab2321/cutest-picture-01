@@ -28,8 +28,11 @@ def load_image(path: Path) -> bytes:
 
 
 def verify_png_chunks(image: bytes) -> None:
-    """Check each PNG chunk checksum and require a complete terminal IEND."""
+    """Check PNG structure, chunk checksums, and the terminal IEND."""
     offset = len(PNG_SIGNATURE)
+    chunk_index = 0
+    saw_idat = False
+    idat_ended = False
     saw_iend = False
 
     while offset < len(image):
@@ -44,6 +47,23 @@ def verify_png_chunks(image: bytes) -> None:
             raise ValueError("entry.png contains a truncated PNG chunk")
 
         chunk_type = image[chunk_type_start:data_start]
+        if (
+            len(chunk_type) != 4
+            or any(not (65 <= value <= 90 or 97 <= value <= 122) for value in chunk_type)
+            or 97 <= chunk_type[2] <= 122
+        ):
+            raise ValueError("entry.png contains an invalid PNG chunk type")
+        if chunk_index == 0 and (chunk_type != b"IHDR" or chunk_length != 13):
+            raise ValueError("entry.png must start with a 13-byte IHDR chunk")
+        if chunk_type == b"IHDR" and chunk_index != 0:
+            raise ValueError("entry.png contains a misplaced IHDR chunk")
+        if chunk_type == b"IDAT":
+            if idat_ended:
+                raise ValueError("entry.png contains non-consecutive IDAT chunks")
+            saw_idat = True
+        elif saw_idat and chunk_type != b"IEND":
+            idat_ended = True
+
         expected_crc = struct.unpack_from(">I", image, data_start + chunk_length)[0]
         actual_crc = zlib.crc32(image[chunk_type_start:data_start + chunk_length])
         if actual_crc != expected_crc:
@@ -51,10 +71,11 @@ def verify_png_chunks(image: bytes) -> None:
 
         offset = chunk_end
         if chunk_type == b"IEND":
-            if chunk_length != 0 or offset != len(image):
+            if chunk_length != 0 or offset != len(image) or not saw_idat:
                 raise ValueError("entry.png has an invalid PNG end chunk")
             saw_iend = True
             break
+        chunk_index += 1
 
     if not saw_iend:
         raise ValueError("entry.png has no complete PNG end chunk")
